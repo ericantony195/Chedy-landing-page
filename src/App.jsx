@@ -1,10 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import PothosPage from './PothosPage';
 
 // Import your 4 local founder photos directly from src/assets/
 import ericPhoto from './assets/image.png';
 import altrinPhoto from './assets/image_2026-10-22_150000817.png';
 import visnuPhoto from './assets/28d10c82-49c6-429c-8238-21f0fe62396d.jpg';
 import rishabPhoto from './assets/1789476840087.jpg';
+
+// Native Vite asset URL resolver for your .glb file
+const burjModelUrl = new URL(
+  './assets/free__burj_khalifa_dubai.glb',
+  import.meta.url
+).href;
 
 /* ==========================================================================
    0. FONT & TAILWIND AUTO-LOADER + SYSTEM-AWARE THEME ENGINE
@@ -46,7 +56,7 @@ function useSystemTheme() {
       link.id = 'chedy-fonts';
       link.rel = 'stylesheet';
       link.href =
-        'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap';
+        'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap';
       document.head.appendChild(link);
     }
 
@@ -68,7 +78,9 @@ function useSystemTheme() {
 }
 
 /* ==========================================================================
-   1. TRANSLUCENT BACKGROUND BOTANICAL CURSOR TRAIL (BEHIND ALL COMPONENTS)
+   1. TRANSLUCENT BACKGROUND BOTANICAL CANVAS
+   - Desktop (Mouse): Continuous vine, leaf & flower cursor trail + click bloom
+   - Mobile (Touch): NO trail & NO spawning while scrolling; blooms only on tap!
    ========================================================================== */
 function MouseGrassTrail({ isDark }) {
   const canvasRef = useRef(null);
@@ -104,6 +116,14 @@ function MouseGrassTrail({ isDark }) {
     let lastMouse = { x: -999, y: -999 };
     let stepCounter = 0;
     let leafSide = 1;
+
+    const touchState = {
+      startX: 0,
+      startY: 0,
+      startTime: 0,
+      moved: false,
+      targetIsInteractive: false,
+    };
 
     const getPalette = () =>
       isDark
@@ -205,6 +225,24 @@ function MouseGrassTrail({ isDark }) {
       if (spores.length > 90) spores.shift();
     };
 
+    const spawnTapBloomCluster = (cx, cy) => {
+      for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 * i) / 8 + (Math.random() - 0.5) * 0.35;
+        spawnLeaf(cx, cy, angle, 1.25);
+        if (i % 2 === 0) spawnTendril(cx, cy, angle);
+      }
+      for (let i = 0; i < 3; i++) {
+        spawnFlower(
+          cx + (Math.random() - 0.5) * 24,
+          cy + (Math.random() - 0.5) * 24,
+          1.3
+        );
+      }
+      for (let i = 0; i < 8; i++) {
+        spawnSpore(cx, cy);
+      }
+    };
+
     const addInterpolatedPoint = (x, y, moveAngle) => {
       vineNodes.push({
         x,
@@ -240,7 +278,8 @@ function MouseGrassTrail({ isDark }) {
       }
     };
 
-    const handleMouseMove = (e) => {
+    const handlePointerMove = (e) => {
+      if (e.pointerType !== 'mouse') return;
       const nx = e.clientX;
       const ny = e.clientY;
 
@@ -265,25 +304,53 @@ function MouseGrassTrail({ isDark }) {
       }
     };
 
-    const handleMouseDown = (e) => {
-      const cx = e.clientX;
-      const cy = e.clientY;
-      for (let i = 0; i < 7; i++) {
-        const angle = (Math.PI * 2 * i) / 7 + (Math.random() - 0.5) * 0.3;
-        spawnLeaf(cx, cy, angle, 1.15);
-        if (i % 2 === 0) spawnTendril(cx, cy, angle);
+    const handlePointerDown = (e) => {
+      if (e.pointerType !== 'mouse') return;
+      if (e.target.closest('button, a, [data-interactive]')) return;
+      spawnTapBloomCluster(e.clientX, e.clientY);
+    };
+
+    const handleTouchStart = (e) => {
+      if (e.touches.length !== 1) {
+        touchState.moved = true;
+        return;
       }
-      for (let i = 0; i < 2; i++) {
-        spawnFlower(
-          cx + (Math.random() - 0.5) * 20,
-          cy + (Math.random() - 0.5) * 20,
-          1.2
-        );
+      const t = e.touches[0];
+      touchState.startX = t.clientX;
+      touchState.startY = t.clientY;
+      touchState.startTime = Date.now();
+      touchState.moved = false;
+      touchState.targetIsInteractive = Boolean(
+        e.target.closest('button, a, [data-interactive]')
+      );
+    };
+
+    const handleTouchMove = (e) => {
+      if (touchState.moved || !e.touches.length) return;
+      const t = e.touches[0];
+      if (
+        Math.hypot(t.clientX - touchState.startX, t.clientY - touchState.startY) > 10
+      ) {
+        touchState.moved = true;
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('mousedown', handleMouseDown, { passive: true });
+    const handleTouchEnd = () => {
+      const elapsed = Date.now() - touchState.startTime;
+      if (
+        !touchState.moved &&
+        !touchState.targetIsInteractive &&
+        elapsed < 400
+      ) {
+        spawnTapBloomCluster(touchState.startX, touchState.startY);
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     const drawRichLeaf = (l, time) => {
       const s = l.scale * Math.min(1, l.life * 1.5);
@@ -503,15 +570,18 @@ function MouseGrassTrail({ isDark }) {
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', resize);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isDark]);
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ opacity: isDark ? 0.42 : 0.38 }}
+      style={{ opacity: isDark ? 0.44 : 0.38 }}
       className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-opacity duration-500"
     />
   );
@@ -519,7 +589,6 @@ function MouseGrassTrail({ isDark }) {
 
 /* ==========================================================================
    2. TYPE-GARDEN BOTANICAL TYPOGRAPHY HERO ("CHEDY")
-   - Clean low density, with LARGER leaves, tendrils, and blossoms
    ========================================================================== */
 function TypeGardenHero({ isDark }) {
   const canvasRef = useRef(null);
@@ -534,11 +603,12 @@ function TypeGardenHero({ isDark }) {
     let width = 0;
     let height = 0;
     let fontSize = 150;
+    let deviceScale = 1;
     let ornaments = [];
 
     const mouse = { x: -9999, y: -9999, vx: 0, vy: 0, px: 0, py: 0 };
 
-    const drawBotanicalLeaf = (ctx, size, color, veinColor) => {
+    const drawBotanicalLeaf = (ctx, size, color, veinColor, sFactor) => {
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(0, 0);
@@ -548,7 +618,7 @@ function TypeGardenHero({ isDark }) {
       ctx.fill();
 
       ctx.strokeStyle = veinColor;
-      ctx.lineWidth = 1.0;
+      ctx.lineWidth = Math.max(0.5, 1.0 * sFactor);
       ctx.beginPath();
       ctx.moveTo(size * 0.1, 0);
       ctx.lineTo(size * 0.84, 0);
@@ -600,7 +670,10 @@ function TypeGardenHero({ isDark }) {
       if (!parent) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = parent.clientWidth;
-      height = Math.min(360, Math.max(240, width * 0.29));
+
+      deviceScale = Math.min(1.12, Math.max(0.42, width / 960));
+
+      height = Math.min(360, Math.max(150, width * 0.29));
       canvas.width = width * dpr;
       canvas.height = height * dpr;
       canvas.style.width = `${width}px`;
@@ -622,7 +695,7 @@ function TypeGardenHero({ isDark }) {
 
       const img = offCtx.getImageData(0, 0, width, height).data;
       const edgePoints = [];
-      const step = 6;
+      const step = Math.max(4, Math.round(6 * deviceScale));
 
       for (let y = step; y < height - step; y += step) {
         for (let x = step; x < width - step; x += step) {
@@ -644,14 +717,16 @@ function TypeGardenHero({ isDark }) {
       }
 
       ornaments = [];
-      const stride = Math.max(5, Math.floor(edgePoints.length / 48));
+      const targetOrnaments = Math.round(48 * Math.pow(deviceScale, 0.45));
+      const stride = Math.max(3, Math.floor(edgePoints.length / Math.max(18, targetOrnaments)));
+
       for (let i = 0; i < edgePoints.length; i += stride) {
         const pt = edgePoints[i];
         const rand = Math.random();
         const isFlower = rand < 0.28;
         const isLongTendril = rand >= 0.28 && rand < 0.58;
 
-        const stemLen = isLongTendril
+        const baseStem = isLongTendril
           ? 38 + Math.random() * 32
           : isFlower
           ? 28 + Math.random() * 26
@@ -662,9 +737,9 @@ function TypeGardenHero({ isDark }) {
           oy: pt.y,
           angle: pt.baseAngle + (Math.random() - 0.5) * 0.6,
           curveBend: (Math.random() - 0.5) * 0.85,
-          stemLen,
-          leafSize: 18 + Math.random() * 14,
-          flowerRadius: 12 + Math.random() * 8,
+          stemLen: baseStem * deviceScale,
+          leafSize: (18 + Math.random() * 14) * deviceScale,
+          flowerRadius: (12 + Math.random() * 8) * deviceScale,
           isFlower,
           isLongTendril,
           grow: 0,
@@ -723,8 +798,9 @@ function TypeGardenHero({ isDark }) {
           const dx = o.ox - mouse.x;
           const dy = o.oy - mouse.y;
           const dist = Math.hypot(dx, dy);
-          if (dist < 120) {
-            const push = (1 - dist / 120) * 0.1;
+          const interactRad = 120 * deviceScale;
+          if (dist < interactRad) {
+            const push = (1 - dist / interactRad) * 0.1;
             o.rotVel += (mouse.vx * 0.03 - o.rotOffset) * push;
           }
           o.rotVel += (0 - o.rotOffset) * 0.06;
@@ -747,7 +823,7 @@ function TypeGardenHero({ isDark }) {
             : o.variant === 0
             ? '#047857'
             : '#065f46';
-          ctx.lineWidth = o.isFlower ? 2.6 : 2.1;
+          ctx.lineWidth = (o.isFlower ? 2.6 : 2.1) * Math.max(0.6, deviceScale);
           ctx.lineCap = 'round';
           ctx.beginPath();
           ctx.moveTo(o.ox, o.oy);
@@ -762,7 +838,8 @@ function TypeGardenHero({ isDark }) {
               ctx,
               o.leafSize * 0.7 * ease,
               isDark ? '#10b981' : '#059669',
-              isDark ? '#a7f3d0' : '#d1fae5'
+              isDark ? '#a7f3d0' : '#d1fae5',
+              deviceScale
             );
             ctx.restore();
           }
@@ -804,7 +881,8 @@ function TypeGardenHero({ isDark }) {
               ctx,
               o.leafSize * ease,
               leafCol,
-              isDark ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.6)'
+              isDark ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.6)',
+              deviceScale
             );
           }
           ctx.restore();
@@ -821,8 +899,8 @@ function TypeGardenHero({ isDark }) {
       ctx.shadowColor = isDark
         ? 'rgba(16, 185, 129, 0.22)'
         : 'rgba(6, 78, 59, 0.16)';
-      ctx.shadowBlur = 28;
-      ctx.shadowOffsetY = 10;
+      ctx.shadowBlur = 28 * deviceScale;
+      ctx.shadowOffsetY = 10 * deviceScale;
 
       const textGrad = ctx.createLinearGradient(0, height * 0.22, 0, height * 0.78);
       if (isDark) {
@@ -844,7 +922,7 @@ function TypeGardenHero({ isDark }) {
       ctx.strokeStyle = isDark
         ? 'rgba(167, 243, 208, 0.28)'
         : 'rgba(16, 185, 129, 0.22)';
-      ctx.lineWidth = 1.25;
+      ctx.lineWidth = Math.max(0.8, 1.25 * deviceScale);
       ctx.strokeText('CHEDY', width / 2, height / 2);
 
       renderPass(true);
@@ -864,6 +942,7 @@ function TypeGardenHero({ isDark }) {
     <div className="w-full max-w-5xl mx-auto flex flex-col items-center">
       <canvas
         ref={canvasRef}
+        data-interactive="true"
         onClick={() => setRegrowTrigger((n) => n + 1)}
         className="w-full cursor-pointer select-none"
       />
@@ -883,7 +962,7 @@ function ScrollSection({ children, className = '', delay = 0 }) {
       if (!ref.current) return;
       const rect = ref.current.getBoundingClientRect();
       const vh = window.innerHeight;
-      const raw = (vh * 0.98 - rect.top) / (vh * 0.22);
+      const raw = (vh * 0.82 - rect.top) / (vh * 0.3);
       const clamped = Math.max(0, Math.min(1, raw));
       setProgress(clamped);
     };
@@ -893,9 +972,9 @@ function ScrollSection({ children, className = '', delay = 0 }) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const translateY = (1 - progress) * 28;
-  const scale = 0.98 + progress * 0.02;
-  const blur = (1 - progress) * 4;
+  const translateY = (1 - progress) * 32;
+  const scale = 0.97 + progress * 0.03;
+  const blur = (1 - progress) * 5;
 
   return (
     <div
@@ -904,7 +983,7 @@ function ScrollSection({ children, className = '', delay = 0 }) {
         opacity: progress,
         transform: `translate3d(0, ${translateY.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`,
         filter: `blur(${blur.toFixed(1)}px)`,
-        transition: `opacity 120ms ease-out ${delay}ms, transform 120ms ease-out ${delay}ms, filter 120ms ease-out ${delay}ms`,
+        transition: `opacity 140ms ease-out ${delay}ms, transform 140ms ease-out ${delay}ms, filter 140ms ease-out ${delay}ms`,
         willChange: 'transform, opacity, filter',
       }}
       className={className}
@@ -927,8 +1006,8 @@ function ScrollScrubText({ text, highlightWords = [], isDark }) {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const vh = window.innerHeight;
-      const start = vh * 0.95;
-      const end = vh * 0.42;
+      const start = vh * 0.78;
+      const end = vh * 0.32;
       const ratio = (start - rect.top) / (start - end);
       setScrollRatio(Math.max(0, Math.min(1, ratio)));
     };
@@ -983,7 +1062,390 @@ function ScrollScrubText({ text, highlightWords = [], isDark }) {
 }
 
 /* ==========================================================================
-   5. AUTHENTIC REACT BITS LANYARD COMPONENT
+   5. 3D BURJ KHALIFA MODEL (`free__burj_khalifa_dubai.glb` IN THE OPEN)
+   ========================================================================== */
+function BurjKhalifa3D({ isDark }) {
+  const mountRef = useRef(null);
+  const stateRef = useRef({
+    angleY: 0.4,
+    velY: 0.0055,
+    dragging: false,
+    lastX: 0,
+    growProgress: 0,
+    targetGrow: 0,
+  });
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!mountRef.current) return;
+      const rect = mountRef.current.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const centerY = rect.top + rect.height * 0.5;
+
+      if (centerY < vh * 0.78 && centerY > vh * 0.12) {
+        stateRef.current.targetGrow = 1;
+      } else {
+        stateRef.current.targetGrow = 0;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    let width = container.clientWidth || 500;
+    let height = container.clientHeight || 640;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 1000);
+    camera.position.set(0, 0.15, 14.6);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = isDark ? 1.35 : 1.15;
+
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, isDark ? 1.7 : 2.2);
+    scene.add(ambientLight);
+
+    const hemiLight = new THREE.HemisphereLight(
+      0xffffff,
+      isDark ? 0x064e3b : 0xd1fae5,
+      1.4
+    );
+    hemiLight.position.set(0, 20, 0);
+    scene.add(hemiLight);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
+    keyLight.position.set(12, 24, 16);
+    scene.add(keyLight);
+
+    const emeraldRimLight = new THREE.DirectionalLight(0x10b981, 2.2);
+    emeraldRimLight.position.set(-14, 10, -12);
+    scene.add(emeraldRimLight);
+
+    const topBeaconLight = new THREE.PointLight(0x34d399, 2.5, 18);
+    topBeaconLight.position.set(0, 5.2, 2);
+    scene.add(topBeaconLight);
+
+    const pivotGroup = new THREE.Group();
+    scene.add(pivotGroup);
+
+    const loader = new GLTFLoader();
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+    loader.setDRACOLoader(dracoLoader);
+
+    let isDisposed = false;
+
+    loader.load(
+      burjModelUrl,
+      (gltf) => {
+        if (isDisposed) return;
+        const model = gltf.scene;
+
+        model.traverse((child) => {
+          if (child.isMesh && child.material) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            if (child.material.isMeshStandardMaterial) {
+              child.material.metalness = Math.min(
+                0.85,
+                Math.max(0.35, child.material.metalness)
+              );
+              child.material.roughness = Math.min(
+                0.55,
+                Math.max(0.2, child.material.roughness)
+              );
+            }
+          }
+        });
+
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        const targetHeight = 7.2;
+        const scaleFactor = targetHeight / maxDim;
+
+        model.scale.setScalar(scaleFactor);
+        model.position.set(
+          -center.x * scaleFactor,
+          -box.min.y * scaleFactor - 3.2,
+          -center.z * scaleFactor
+        );
+
+        pivotGroup.add(model);
+      },
+      undefined,
+      (err) => {
+        console.error('Error loading free__burj_khalifa_dubai.glb:', err);
+      }
+    );
+
+    let animId;
+    const animate = () => {
+      animId = requestAnimationFrame(animate);
+
+      stateRef.current.growProgress +=
+        (stateRef.current.targetGrow - stateRef.current.growProgress) * 0.042;
+
+      const g = Math.max(0.001, stateRef.current.growProgress);
+      const easeOut = 1 - Math.pow(1 - g, 3);
+
+      pivotGroup.scale.set(easeOut, easeOut, easeOut);
+      pivotGroup.position.y = (1 - easeOut) * -1.5;
+
+      if (!stateRef.current.dragging) {
+        stateRef.current.velY += (0.0055 - stateRef.current.velY) * 0.05;
+        stateRef.current.angleY += stateRef.current.velY;
+      }
+      pivotGroup.rotation.y = stateRef.current.angleY + (1 - easeOut) * 1.8;
+
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    const updateSize = () => {
+      if (!container) return;
+      const nw = container.clientWidth;
+      const nh = container.clientHeight;
+      if (nw > 0 && nh > 0) {
+        width = nw;
+        height = nh;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height, false);
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateSize();
+    });
+    resizeObserver.observe(container);
+    window.addEventListener('resize', updateSize);
+    requestAnimationFrame(updateSize);
+
+    return () => {
+      isDisposed = true;
+      cancelAnimationFrame(animId);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateSize);
+      dracoLoader.dispose();
+      renderer.dispose();
+    };
+  }, [isDark]);
+
+  const handlePointerDown = (e) => {
+    stateRef.current.dragging = true;
+    stateRef.current.lastX = e.clientX;
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!stateRef.current.dragging) return;
+      const dx = e.clientX - stateRef.current.lastX;
+      stateRef.current.lastX = e.clientX;
+      stateRef.current.velY = dx * 0.012;
+      stateRef.current.angleY += stateRef.current.velY;
+    };
+    const onUp = () => {
+      stateRef.current.dragging = false;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={mountRef}
+      data-interactive="true"
+      onPointerDown={handlePointerDown}
+      style={{ touchAction: 'pan-y' }}
+      className="relative w-full h-[540px] sm:h-[660px] overflow-hidden cursor-grab active:cursor-grabbing select-none"
+      title="Drag to rotate Burj Khalifa 3D model"
+    />
+  );
+}
+
+/* ==========================================================================
+   6. "WHAT WE ARE WORKING ON" — 3 PRODUCT CARDS WITH "VISIT PAGE" ICON
+   Clicking Pothos opens the dedicated PothosPage!
+   ========================================================================== */
+function WhatWeAreWorkingOnSection({ theme, onOpenPothos }) {
+  const products = [
+    {
+      num: '01 / Pothos',
+      tag: 'AI SALES AGENT',
+      title: 'Pothos — Autonomous Lead Gen & Sales Agent.',
+      desc: 'Drop your website link or describe your business. Pothos automatically learns what you sell, discovers high-intent buyers, and deploys an AI sales agent that pitches them and books meetings on autopilot.',
+      onClick: onOpenPothos,
+    },
+    {
+      num: '02 / Smart Logistics',
+      tag: 'SOFTWARE + IOT',
+      title: 'Autonomous Food Locker System.',
+      desc: 'A 100% software-orchestrated pickup ecosystem built for both delivery drivers and customers. Riders drop orders into smart thermal lockers in seconds without waiting, and customers unlock their meal whenever they’re ready.',
+      href: '#food-locker-system',
+    },
+    {
+      num: '03 / Conversational AI',
+      tag: 'VOICE + WHATSAPP',
+      title: 'Frontdesk AI Receptionist.',
+      desc: 'An AI agent that learns every detail of a business, answers phone calls in a natural human voice, and replies on WhatsApp 24/7—resolving customer queries, checking availability, and booking restaurant tables automatically.',
+      href: '#frontdesk-ai-agent',
+    },
+  ];
+
+  return (
+    <section className="min-h-screen flex items-center justify-center py-20 px-6 sm:px-12 relative z-10">
+      <div className="max-w-7xl w-full mx-auto">
+        <ScrollSection className="max-w-3xl mb-14">
+          <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
+            In The Lab
+          </div>
+          <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
+            What we’re
+            <br />
+            <span className="text-emerald-500">working on.</span>
+          </h2>
+          <p
+            style={{ color: theme.muted }}
+            className="mt-5 text-base sm:text-xl font-normal"
+          >
+            A look inside the original products and platforms we are actively building right now.
+          </p>
+        </ScrollSection>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+          {products.map((item, idx) => (
+            <ScrollSection key={item.title} delay={idx * 40} className="h-full">
+              <div
+                onClick={item.onClick}
+                style={{
+                  backgroundColor: theme.card,
+                  borderColor: theme.border,
+                }}
+                className={`group rounded-[36px] border p-8 sm:p-10 h-full flex flex-col justify-between transition-all duration-500 hover:-translate-y-1.5 shadow-lg shadow-emerald-950/5 ${
+                  item.onClick ? 'cursor-pointer' : ''
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-6">
+                    <span className="text-xs font-mono font-bold uppercase tracking-widest text-emerald-500">
+                      {item.num}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-500">
+                      {item.tag}
+                    </span>
+                  </div>
+
+                  <h3 className="text-2xl sm:text-3xl font-bold tracking-tight leading-tight">
+                    {item.title}
+                  </h3>
+
+                  <p
+                    style={{ color: theme.muted }}
+                    className="mt-4 text-sm sm:text-base leading-relaxed"
+                  >
+                    {item.desc}
+                  </p>
+                </div>
+
+                {/* Visit Page Button & Icon */}
+                <div className="mt-10 pt-6 border-t border-emerald-500/15">
+                  {item.onClick ? (
+                    <button
+                      type="button"
+                      data-interactive="true"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        item.onClick();
+                      }}
+                      className="w-full inline-flex items-center justify-between text-sm font-semibold text-emerald-500 group-hover:text-emerald-400 transition cursor-pointer"
+                    >
+                      <span>Visit Pothos Page</span>
+                      <span className="w-10 h-10 rounded-full border border-emerald-500/25 bg-emerald-500/10 group-hover:bg-emerald-500 group-hover:text-white flex items-center justify-center transition-all duration-300 shadow-sm">
+                        <svg
+                          className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M7 17L17 7M17 7H8M17 7V16"
+                          />
+                        </svg>
+                      </span>
+                    </button>
+                  ) : (
+                    <a
+                      href={item.href}
+                      data-interactive="true"
+                      className="w-full inline-flex items-center justify-between text-sm font-semibold text-emerald-500 group-hover:text-emerald-400 transition"
+                    >
+                      <span>Visit Page</span>
+                      <span className="w-10 h-10 rounded-full border border-emerald-500/25 bg-emerald-500/10 group-hover:bg-emerald-500 group-hover:text-white flex items-center justify-center transition-all duration-300 shadow-sm">
+                        <svg
+                          className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M7 17L17 7M17 7H8M17 7V16"
+                          />
+                        </svg>
+                      </span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            </ScrollSection>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ==========================================================================
+   7. AUTHENTIC REACT BITS LANYARD COMPONENT
    ========================================================================== */
 function ReactBitsLanyard({
   member,
@@ -994,7 +1456,6 @@ function ReactBitsLanyard({
 }) {
   const wrapperRef = useRef(null);
   const cardDomRef = useRef(null);
-  const glossRef = useRef(null);
   const backStrapRef = useRef(null);
   const frontStrapRef = useRef(null);
   const stitchStrapRef = useRef(null);
@@ -1005,6 +1466,8 @@ function ReactBitsLanyard({
 
   const phys = useRef({
     points: [],
+    pointerPressed: false,
+    activePointerId: null,
     dragging: false,
     startClient: { x: 0, y: 0 },
     movedDist: 0,
@@ -1100,8 +1563,8 @@ function ReactBitsLanyard({
             targetY = dyAnchor * scale;
           }
 
-          p.x += (targetX - p.x) * 0.55;
-          p.y += (targetY - p.y) * 0.55;
+          p.x += (targetX - p.x) * 0.65;
+          p.y += (targetY - p.y) * 0.65;
           phys.current.throwVel.vx = p.x - prevX;
           phys.current.throwVel.vy = p.y - prevY;
           p.oldX = p.x - phys.current.throwVel.vx;
@@ -1190,16 +1653,6 @@ function ReactBitsLanyard({
           2
         )}deg) rotateY(${phys.current.rotY.toFixed(2)}deg)`;
       }
-
-      if (glossRef.current) {
-        const gx = 50 + phys.current.rotY * 2.2 + phys.current.rotZ * 1.2;
-        const gy = 35 + phys.current.rotX * 2.2;
-        glossRef.current.style.background = `radial-gradient(circle at ${gx.toFixed(
-          0
-        )}% ${gy.toFixed(
-          0
-        )}%, rgba(255,255,255,0.28) 0%, rgba(16,185,129,0.08) 38%, transparent 70%)`;
-      }
     };
 
     stepPhysics();
@@ -1211,63 +1664,79 @@ function ReactBitsLanyard({
     if (e.target.closest('a, button')) return;
 
     onFocusLanyard();
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const rect = wrapper.getBoundingClientRect();
-    const mx = clientX - rect.left;
-    const my = clientY - rect.top;
-
-    const pts = phys.current.points;
-    const tip = pts[pts.length - 1];
-
-    phys.current.dragging = true;
+    phys.current.pointerPressed = true;
+    phys.current.activePointerId = e.pointerId;
+    phys.current.dragging = false;
     phys.current.movedDist = 0;
-    phys.current.startClient = { x: clientX, y: clientY };
-    phys.current.targetMouse = { x: mx, y: my };
-    phys.current.grabOffset = { x: mx - tip.x, y: my - tip.y };
-    setIsDragging(true);
+    phys.current.startClient = { x: e.clientX, y: e.clientY };
   };
 
   useEffect(() => {
     const handlePointerMove = (e) => {
-      if (!phys.current.dragging || !wrapperRef.current) return;
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      if (
+        !phys.current.pointerPressed ||
+        e.pointerId !== phys.current.activePointerId ||
+        !wrapperRef.current
+      ) {
+        return;
+      }
 
-      const dx = clientX - phys.current.startClient.x;
-      const dy = clientY - phys.current.startClient.y;
-      phys.current.movedDist = Math.hypot(dx, dy);
+      const dx = e.clientX - phys.current.startClient.x;
+      const dy = e.clientY - phys.current.startClient.y;
+      const dist = Math.hypot(dx, dy);
+      phys.current.movedDist = dist;
 
-      const rect = wrapperRef.current.getBoundingClientRect();
-      phys.current.targetMouse = {
-        x: clientX - rect.left,
-        y: Math.max(-40, Math.min(520, clientY - rect.top)),
-      };
+      if (!phys.current.dragging && dist > 10) {
+        const rect = wrapperRef.current.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const pts = phys.current.points;
+        const tip = pts[pts.length - 1];
+
+        phys.current.grabOffset = { x: mx - tip.x, y: my - tip.y };
+        phys.current.targetMouse = { x: mx, y: my };
+        phys.current.dragging = true;
+        setIsDragging(true);
+      }
+
+      if (phys.current.dragging) {
+        const rect = wrapperRef.current.getBoundingClientRect();
+        phys.current.targetMouse = {
+          x: e.clientX - rect.left,
+          y: Math.max(-40, Math.min(520, e.clientY - rect.top)),
+        };
+      }
     };
 
-    const handlePointerUp = () => {
-      if (!phys.current.dragging) return;
+    const handlePointerUp = (e) => {
+      if (
+        !phys.current.pointerPressed ||
+        e.pointerId !== phys.current.activePointerId
+      ) {
+        return;
+      }
+
+      const wasDragging = phys.current.dragging;
+      const totalMoved = phys.current.movedDist;
+
+      phys.current.pointerPressed = false;
+      phys.current.activePointerId = null;
       phys.current.dragging = false;
       setIsDragging(false);
 
-      if (phys.current.movedDist < 7) {
+      if (!wasDragging && totalMoved <= 10) {
         setIsFlipped((prev) => !prev);
       }
     };
 
-    window.addEventListener('mousemove', handlePointerMove, { passive: true });
-    window.addEventListener('mouseup', handlePointerUp);
-    window.addEventListener('touchmove', handlePointerMove, { passive: true });
-    window.addEventListener('touchend', handlePointerUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
 
     return () => {
-      window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseup', handlePointerUp);
-      window.removeEventListener('touchmove', handlePointerMove);
-      window.removeEventListener('touchend', handlePointerUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, []);
 
@@ -1350,14 +1819,18 @@ function ReactBitsLanyard({
 
       <div
         ref={cardDomRef}
-        onMouseDown={handlePointerDown}
-        onTouchStart={handlePointerDown}
+        data-interactive="true"
+        onPointerDown={handlePointerDown}
         style={{
           width: 236,
           height: 332,
           transformOrigin: '50% 10px',
           perspective: '1200px',
           willChange: 'transform',
+          touchAction: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+          WebkitTapHighlightColor: 'transparent',
           zIndex: 15,
         }}
         className={`absolute top-0 left-0 ${
@@ -1388,11 +1861,6 @@ function ReactBitsLanyard({
             }}
             className="absolute inset-0 rounded-[28px] border p-3.5 flex flex-col justify-between shadow-[0_28px_60px_-12px_rgba(0,0,0,0.28)] overflow-hidden"
           >
-            <div
-              ref={glossRef}
-              className="pointer-events-none absolute inset-0 z-20 transition-opacity duration-200"
-            />
-
             <div className="relative z-10 flex justify-center pt-0.5 pb-2">
               <div
                 style={{
@@ -1405,14 +1873,13 @@ function ReactBitsLanyard({
               />
             </div>
 
-            <div className="relative z-10 w-full h-[228px] rounded-[20px] overflow-hidden bg-emerald-950/20">
+            <div className="relative z-10 w-full h-[228px] rounded-[20px] overflow-hidden bg-zinc-900">
               <img
                 src={member.photo}
                 alt={member.name}
                 draggable={false}
                 className="w-full h-full object-cover object-center pointer-events-none select-none"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
             </div>
 
             <div className="relative z-10 pt-2.5 pb-1 px-2 flex items-center justify-between">
@@ -1472,11 +1939,9 @@ function ReactBitsLanyard({
                 href={member.linkedin}
                 target="_blank"
                 rel="noopener noreferrer"
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                style={{ touchAction: 'manipulation' }}
                 className="relative z-30 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-semibold transition shadow-md shadow-emerald-600/20 cursor-pointer"
               >
                 <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
@@ -1489,7 +1954,7 @@ function ReactBitsLanyard({
                 style={{ color: isDark ? '#6b7f74' : '#86968d' }}
                 className="text-[11px] font-medium"
               >
-                Click to flip
+                Tap to flip
               </span>
             </div>
           </div>
@@ -1500,11 +1965,71 @@ function ReactBitsLanyard({
 }
 
 /* ==========================================================================
-   6. MAIN APPLE-STYLE MINIMAL LANDING PAGE FOR CHEDY.NET
+   8. MAIN APPLE-STYLE MINIMAL LANDING PAGE FOR CHEDY.NET + POTHOS ROUTER
    ========================================================================== */
 export default function App() {
   const { isDark, toggleTheme } = useSystemTheme();
   const [zOrder, setZOrder] = useState([10, 11, 12, 13]);
+  const [currentPage, setCurrentPage] = useState(() =>
+    window.location.hash.startsWith('#/pothos') ? 'pothos' : 'home'
+  );
+
+  // Force manual scroll restoration so switching back to CHEDY.NET never lands in the middle/bottom
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+  }, []);
+
+  const forceScrollToTop = () => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  };
+
+  useEffect(() => {
+    const onHashChange = () => {
+      if (window.location.hash.startsWith('#/pothos')) {
+        setCurrentPage('pothos');
+        forceScrollToTop();
+      } else if (
+        window.location.hash === '' ||
+        window.location.hash === '#' ||
+        window.location.hash === '#/'
+      ) {
+        setCurrentPage('home');
+        forceScrollToTop();
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // Guarantee top-of-page scroll after React finishes mounting the target page
+  useEffect(() => {
+    forceScrollToTop();
+    const raf = requestAnimationFrame(forceScrollToTop);
+    const timer = setTimeout(forceScrollToTop, 30);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, [currentPage]);
+
+  const navigateTo = (page) => {
+    if (page === 'pothos') {
+      window.location.hash = '#/pothos';
+      setCurrentPage('pothos');
+    } else {
+      window.history.pushState(
+        '',
+        document.title,
+        window.location.pathname + window.location.search
+      );
+      setCurrentPage('home');
+    }
+    forceScrollToTop();
+  };
 
   const bringLanyardToFront = (idx) => {
     setZOrder((prev) => {
@@ -1530,7 +2055,7 @@ export default function App() {
       name: 'Eric Antony',
       dept: 'Co-Founder & CEO',
       whatTheyDo:
-        'Architects foundational AI models, autonomous agents and neural intelligence products.',
+        'Leads product vision, company strategy, and the creation of software products that shape how the world works.',
       photo: ericPhoto,
       linkedin: 'https://www.linkedin.com',
     },
@@ -1538,7 +2063,7 @@ export default function App() {
       name: 'Altrin Lloyd',
       dept: 'Co-Founder & CTO',
       whatTheyDo:
-        'Turns high-dimensional data streams into predictive engines and real time decisions.',
+        'Architects core software systems, high-speed engineering standards, and next-generation technology platforms.',
       photo: altrinPhoto,
       linkedin: 'https://www.linkedin.com/in/altrin-lloyd-hudson/',
     },
@@ -1546,7 +2071,7 @@ export default function App() {
       name: 'Visnu Anand',
       dept: 'Co-Founder & MD',
       whatTheyDo:
-        'Protects every system and product with zero trust architecture and active defense.',
+        'Drives venture growth, strategic partnerships, and the execution of mission-critical software initiatives.',
       photo: visnuPhoto,
       linkedin: 'https://www.linkedin.com/in/visnuanand/',
     },
@@ -1554,32 +2079,9 @@ export default function App() {
       name: 'Rishab Dinesh',
       dept: 'Co-Founder & COO',
       whatTheyDo:
-        'Engineers self healing cloud infrastructure and global zero downtime deployments.',
+        'Leads global operations, product delivery, and scalable systems that take software from idea to worldwide impact.',
       photo: rishabPhoto,
-      linkedin: 'https://www.linkedin.com',
-    },
-  ];
-
-  const domains = [
-    {
-      num: '01',
-      title: 'Artificial Intelligence',
-      desc: 'Intelligent systems and custom neural architectures built to think, adapt, and scale.',
-    },
-    {
-      num: '02',
-      title: 'Data Science',
-      desc: 'Turning massive, unstructured information into clarity, foresight, and precision.',
-    },
-    {
-      num: '03',
-      title: 'CyberSecurity',
-      desc: 'Uncompromising protection engineered directly into the core of every product.',
-    },
-    {
-      num: '04',
-      title: 'Cloud & DevOps',
-      desc: 'Resilient, self-healing infrastructure designed for effortless global performance.',
+      linkedin: 'https://www.linkedin.com/in/rishabdhinesh/',
     },
   ];
 
@@ -1592,7 +2094,7 @@ export default function App() {
       }}
       className="min-h-screen transition-colors duration-500 selection:bg-emerald-500 selection:text-white overflow-x-hidden relative"
     >
-      {/* Translucent Botanical Cursor Trail in the Background (z-0) */}
+      {/* Translucent Botanical Background Canvas (z-0) */}
       <MouseGrassTrail isDark={isDark} />
 
       {/* Minimal Top-Right Theme Switch */}
@@ -1645,266 +2147,289 @@ export default function App() {
         )}
       </button>
 
-      {/* SCREEN 1: HERO */}
-      <section className="relative min-h-screen flex flex-col items-center justify-between py-16 px-6 text-center z-10">
-        <div
-          style={{ color: theme.muted }}
-          className="text-xs font-semibold tracking-[0.28em] uppercase"
-        >
-          CHEDY.NET
-        </div>
+      {currentPage === 'pothos' ? (
+        <PothosPage
+          isDark={isDark}
+          toggleTheme={toggleTheme}
+          theme={theme}
+          onBackHome={() => navigateTo('home')}
+          ScrollSection={ScrollSection}
+          ScrollScrubText={ScrollScrubText}
+        />
+      ) : (
+        <>
+          {/* SCREEN 1: HERO */}
+          <section className="relative min-h-screen flex flex-col items-center justify-between py-16 px-6 text-center z-10">
+            <div
+              style={{ color: theme.muted }}
+              className="text-xs font-semibold tracking-[0.28em] uppercase"
+            >
+              CHEDY.NET
+            </div>
 
-        <div className="w-full my-auto py-8">
-          <TypeGardenHero isDark={isDark} />
+            <div className="w-full my-auto py-8">
+              <TypeGardenHero isDark={isDark} />
 
-          <h1 className="mt-8 text-3xl sm:text-5xl md:text-6xl font-bold tracking-tight max-w-3xl mx-auto leading-[1.08]">
-            Software the future{' '}
-            <span className="text-emerald-500">can’t live without.</span>
-          </h1>
-        </div>
+              <h1 className="mt-8 text-3xl sm:text-5xl md:text-6xl font-bold tracking-tight max-w-3xl mx-auto leading-[1.08]">
+                Software that{' '}
+                <span className="text-emerald-500">shapes the world.</span>
+              </h1>
+            </div>
 
-        <a
-          href="#philosophy"
-          style={{ color: theme.muted }}
-          className="inline-flex flex-col items-center gap-2 text-xs font-medium tracking-widest uppercase hover:text-emerald-500 transition"
-        >
-          <span>Scroll</span>
-          <svg
-            className="w-4 h-4 animate-bounce text-emerald-500"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+            <button
+              type="button"
+              onClick={() =>
+                document
+                  .getElementById('philosophy')
+                  ?.scrollIntoView({ behavior: 'smooth' })
+              }
+              style={{ color: theme.muted }}
+              className="inline-flex flex-col items-center gap-2 text-xs font-medium tracking-widest uppercase hover:text-emerald-500 transition cursor-pointer bg-transparent border-0"
+            >
+              <span>Scroll</span>
+              <svg
+                className="w-4 h-4 animate-bounce text-emerald-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                />
+              </svg>
+            </button>
+          </section>
+
+          {/* SCREEN 2: THE STORY (SCROLL-SCRUBBED) */}
+          <section
+            id="philosophy"
+            className="min-h-screen flex items-center justify-center py-32 px-6 sm:px-12 relative z-10"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 14l-7 7m0 0l-7-7m7 7V3"
-            />
-          </svg>
-        </a>
-      </section>
-
-      {/* SCREEN 2: THE STORY (SCROLL-SCRUBBED) */}
-      <section
-        id="philosophy"
-        className="min-h-screen flex items-center justify-center py-32 px-6 sm:px-12 relative z-10"
-      >
-        <div className="max-w-5xl mx-auto">
-          <ScrollSection>
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-8">
-              The Meaning of Chedy
-            </div>
-          </ScrollSection>
-
-          <ScrollScrubText
-            isDark={isDark}
-            highlightWords={[
-              'chedy',
-              'sapling',
-              'humanity',
-              'cannot',
-              'revolutionary',
-              'software',
-            ]}
-            text="Chedy means sapling. Just as humanity cannot exist without the living plants that sustain our world, we build the revolutionary software and foundational products that tomorrow will not be able to live without."
-          />
-        </div>
-      </section>
-
-      {/* SCREEN 3: SOLUTIONS & PROPRIETARY PRODUCTS */}
-      <section className="min-h-screen flex items-center justify-center py-32 px-6 sm:px-12 relative z-10">
-        <div className="max-w-6xl w-full mx-auto">
-          <ScrollSection className="max-w-3xl mb-20">
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
-              What We Do
-            </div>
-            <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
-              One parent company.
-              <br />
-              <span className="text-emerald-500">
-                Two ways we shape the world.
-              </span>
-            </h2>
-          </ScrollSection>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <ScrollSection delay={30}>
-              <div
-                style={{
-                  backgroundColor: theme.card,
-                  borderColor: theme.border,
-                }}
-                className="group rounded-[36px] border p-10 sm:p-14 h-full flex flex-col justify-between transition-all duration-500 hover:-translate-y-1.5 backdrop-blur-md"
-              >
-                <div>
-                  <span className="inline-block text-xs font-bold uppercase tracking-widest text-emerald-500 mb-6">
-                    01 / Solutions
-                  </span>
-                  <h3 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
-                    Bespoke Technology Solutions.
-                  </h3>
-                  <p
-                    style={{ color: theme.muted }}
-                    className="mt-5 text-base sm:text-lg leading-relaxed"
-                  >
-                    We partner with ambitious organizations to engineer custom software, intelligent workflows, and resilient cloud systems from the ground up.
-                  </p>
-                </div>
-
-                <div className="mt-14 pt-6 border-t border-emerald-500/15 flex items-center justify-between text-sm font-semibold text-emerald-500">
-                  <span>Custom Engineering</span>
-                  <span>→</span>
-                </div>
-              </div>
-            </ScrollSection>
-
-            <ScrollSection delay={80}>
-              <div
-                style={{
-                  backgroundColor: theme.card,
-                  borderColor: theme.border,
-                }}
-                className="group rounded-[36px] border p-10 sm:p-14 h-full flex flex-col justify-between transition-all duration-500 hover:-translate-y-1.5 backdrop-blur-md"
-              >
-                <div>
-                  <span className="inline-block text-xs font-bold uppercase tracking-widest text-emerald-500 mb-6">
-                    02 / Originals
-                  </span>
-                  <h3 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
-                    Proprietary Products of Our Own.
-                  </h3>
-                  <p
-                    style={{ color: theme.muted }}
-                    className="mt-5 text-base sm:text-lg leading-relaxed"
-                  >
-                    Inside Chedy, we incubate and launch our own suite of original software products—designed to redefine how people and businesses operate.
-                  </p>
-                </div>
-
-                <div className="mt-14 pt-6 border-t border-emerald-500/15 flex items-center justify-between text-sm font-semibold text-emerald-500">
-                  <span>In-House Ventures</span>
-                  <span>✦</span>
-                </div>
-              </div>
-            </ScrollSection>
-          </div>
-        </div>
-      </section>
-
-      {/* SCREEN 4: CORE DISCIPLINES */}
-      <section className="min-h-screen flex items-center justify-center py-32 px-6 sm:px-12 relative z-10">
-        <div className="max-w-6xl w-full mx-auto">
-          <ScrollSection className="mb-20">
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
-              Core Foundations
-            </div>
-            <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
-              Four disciplines.
-              <br />
-              <span className="text-emerald-500">Complete mastery.</span>
-            </h2>
-          </ScrollSection>
-
-          <div className="divide-y divide-emerald-500/15 border-y border-emerald-500/15">
-            {domains.map((item, idx) => (
-              <ScrollSection key={item.num} delay={idx * 35}>
-                <div className="py-10 sm:py-12 flex flex-col md:flex-row md:items-center justify-between gap-4 group">
-                  <div className="flex items-baseline gap-6">
-                    <span className="text-sm font-mono font-bold text-emerald-500">
-                      {item.num}
-                    </span>
-                    <h3 className="text-3xl sm:text-5xl font-bold tracking-tight group-hover:translate-x-2 transition-transform duration-300">
-                      {item.title}
-                    </h3>
-                  </div>
-                  <p
-                    style={{ color: theme.muted }}
-                    className="text-base sm:text-lg max-w-md md:text-right"
-                  >
-                    {item.desc}
-                  </p>
+            <div className="max-w-5xl mx-auto">
+              <ScrollSection>
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-8">
+                  The Meaning of Chedy
                 </div>
               </ScrollSection>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* SCREEN 5: REACT BITS LANYARDS */}
-      <section className="min-h-screen flex flex-col justify-center py-32 px-6 relative z-10 overflow-visible">
-        <div className="max-w-7xl w-full mx-auto overflow-visible">
-          <ScrollSection className="text-center max-w-3xl mx-auto mb-8">
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
-              Leadership
+              <ScrollScrubText
+                isDark={isDark}
+                highlightWords={[
+                  'chedy',
+                  'sapling',
+                  'humanity',
+                  'cannot',
+                  'revolutionary',
+                  'software',
+                ]}
+                text="Chedy means sapling. Just as humanity cannot exist without the living plants that sustain our world, we build the revolutionary software and foundational products that tomorrow will not be able to live without."
+              />
             </div>
-            <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
-              The Minds Behind Chedy.
-            </h2>
-            <p
-              style={{ color: theme.muted }}
-              className="mt-4 text-base sm:text-xl font-normal"
-            >
-              Drag, stretch, or throw any badge. Click a badge to flip it over.
-            </p>
-          </ScrollSection>
+          </section>
 
-          <ScrollSection delay={60} className="overflow-visible">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 overflow-visible">
-              {founders.map((member, idx) => (
-                <ReactBitsLanyard
-                  key={member.name}
-                  member={member}
-                  isDark={isDark}
-                  index={idx}
-                  zIndex={zOrder[idx]}
-                  onFocusLanyard={() => bringLanyardToFront(idx)}
-                />
-              ))}
+          {/* SCREEN 3: PROPRIETARY PRODUCTS FIRST, THEN BESPOKE SOFTWARE SOLUTIONS */}
+          <section className="min-h-screen flex items-center justify-center py-32 px-6 sm:px-12 relative z-10">
+            <div className="max-w-6xl w-full mx-auto">
+              <ScrollSection className="max-w-3xl mb-20">
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
+                  What We Do
+                </div>
+                <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
+                  One software company.
+                  <br />
+                  <span className="text-emerald-500">
+                    Two ways we shape the world.
+                  </span>
+                </h2>
+              </ScrollSection>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* 01 / ORIGINALS */}
+                <ScrollSection delay={30}>
+                  <div
+                    style={{
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                    }}
+                    className="group rounded-[36px] border p-10 sm:p-14 h-full flex flex-col justify-between transition-all duration-500 hover:-translate-y-1.5 backdrop-blur-md"
+                  >
+                    <div>
+                      <span className="inline-block text-xs font-bold uppercase tracking-widest text-emerald-500 mb-6">
+                        01 / Originals
+                      </span>
+                      <h3 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
+                        Proprietary Products of Our Own.
+                      </h3>
+                      <p
+                        style={{ color: theme.muted }}
+                        className="mt-5 text-base sm:text-lg leading-relaxed"
+                      >
+                        Inside Chedy, we incubate and launch our own suite of original software ventures—built to solve real problems and redefine how people live and work every day.
+                      </p>
+                    </div>
+
+                    <div className="mt-14 pt-6 border-t border-emerald-500/15 flex items-center justify-between text-sm font-semibold text-emerald-500">
+                      <span>In-House Ventures</span>
+                      <span>✦</span>
+                    </div>
+                  </div>
+                </ScrollSection>
+
+                {/* 02 / SOLUTIONS */}
+                <ScrollSection delay={80}>
+                  <div
+                    style={{
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                    }}
+                    className="group rounded-[36px] border p-10 sm:p-14 h-full flex flex-col justify-between transition-all duration-500 hover:-translate-y-1.5 backdrop-blur-md"
+                  >
+                    <div>
+                      <span className="inline-block text-xs font-bold uppercase tracking-widest text-emerald-500 mb-6">
+                        02 / Solutions
+                      </span>
+                      <h3 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
+                        Bespoke Software Solutions.
+                      </h3>
+                      <p
+                        style={{ color: theme.muted }}
+                        className="mt-5 text-base sm:text-lg leading-relaxed"
+                      >
+                        We partner with ambitious companies to design and engineer custom software platforms, digital products, and scalable systems from the ground up.
+                      </p>
+                    </div>
+
+                    <div className="mt-14 pt-6 border-t border-emerald-500/15 flex items-center justify-between text-sm font-semibold text-emerald-500">
+                      <span>Custom Engineering</span>
+                      <span>→</span>
+                    </div>
+                  </div>
+                </ScrollSection>
+              </div>
             </div>
-          </ScrollSection>
-        </div>
-      </section>
+          </section>
 
-      {/* SCREEN 6: CLOSING CTA */}
-      <section
-        style={{ backgroundColor: theme.bgSubtle }}
-        className="py-36 px-6 sm:px-12 text-center border-t border-emerald-500/15 relative z-10"
-      >
-        <ScrollSection className="max-w-4xl mx-auto">
-          <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
-            Let’s grow something
-            <br />
-            <span className="text-emerald-500">revolutionary.</span>
-          </h2>
-          <p
-            style={{ color: theme.muted }}
-            className="mt-6 text-lg sm:text-xl max-w-xl mx-auto"
+          {/* SCREEN 4: BUILT FOR THE UAE MARKET + OPEN 3D BURJ KHALIFA ON RIGHT */}
+          <section className="min-h-screen flex items-center justify-center py-32 px-6 sm:px-12 relative z-10 overflow-visible">
+            <div className="max-w-7xl w-full mx-auto">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                <div className="lg:col-span-6">
+                  <ScrollSection>
+                    <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
+                      Regional Focus
+                    </div>
+                    <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
+                      Built for the
+                      <br />
+                      <span className="text-emerald-500">UAE market.</span>
+                    </h2>
+                    <p
+                      style={{ color: theme.muted }}
+                      className="mt-6 text-lg sm:text-2xl leading-relaxed font-normal"
+                    >
+                      Solving real UAE challenges—one software breakthrough at a time.
+                    </p>
+                    <p
+                      style={{ color: theme.muted }}
+                      className="mt-4 text-base sm:text-lg leading-relaxed"
+                    >
+                      From Dubai’s fast-moving hospitality and delivery ecosystems to its fastest-growing enterprises, we engineer software purpose-built for the speed, ambition, and scale of the Emirates.
+                    </p>
+                  </ScrollSection>
+                </div>
+
+                <div className="lg:col-span-6 overflow-visible">
+                  <BurjKhalifa3D isDark={isDark} />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* SCREEN 5: WHAT WE ARE WORKING ON */}
+          <WhatWeAreWorkingOnSection
+            theme={theme}
+            onOpenPothos={() => navigateTo('pothos')}
+          />
+
+          {/* SCREEN 6: REACT BITS LANYARDS */}
+          <section className="min-h-screen flex flex-col justify-center py-32 px-6 relative z-10 overflow-visible">
+            <div className="max-w-7xl w-full mx-auto overflow-visible">
+              <ScrollSection className="text-center max-w-3xl mx-auto mb-8">
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-500 mb-4">
+                  Leadership
+                </div>
+                <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
+                  The Minds Behind Chedy.
+                </h2>
+                <p
+                  style={{ color: theme.muted }}
+                  className="mt-4 text-base sm:text-xl font-normal"
+                >
+                  Drag, stretch, or throw any badge. Tap or click a badge to flip it over.
+                </p>
+              </ScrollSection>
+
+              <ScrollSection delay={60} className="overflow-visible">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 overflow-visible">
+                  {founders.map((member, idx) => (
+                    <ReactBitsLanyard
+                      key={member.name}
+                      member={member}
+                      isDark={isDark}
+                      index={idx}
+                      zIndex={zOrder[idx]}
+                      onFocusLanyard={() => bringLanyardToFront(idx)}
+                    />
+                  ))}
+                </div>
+              </ScrollSection>
+            </div>
+          </section>
+
+          {/* SCREEN 7: CLOSING CTA */}
+          <section
+            style={{ backgroundColor: theme.bgSubtle }}
+            className="py-36 px-6 sm:px-12 text-center border-t border-emerald-500/15 relative z-10"
           >
-            Partner with us on custom technology solutions or discover our upcoming proprietary products.
-          </p>
+            <ScrollSection className="max-w-4xl mx-auto">
+              <h2 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.06]">
+                Let’s build something
+                <br />
+                <span className="text-emerald-500">revolutionary.</span>
+              </h2>
+              <p
+                style={{ color: theme.muted }}
+                className="mt-6 text-lg sm:text-xl max-w-xl mx-auto"
+              >
+                Partner with us on custom software solutions or get early access to our upcoming UAE products.
+              </p>
 
-          <div className="mt-10">
-            <a
-              href="mailto:hello@chedy.net"
-              className="inline-flex items-center gap-3 px-8 py-4 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-base font-semibold shadow-xl shadow-emerald-600/25 hover:scale-105 transition-all"
-            >
-              <span>hello@chedy.net</span>
-              <span>↗</span>
-            </a>
-          </div>
+              <div className="mt-10">
+                <a
+                  href="mailto:hello@chedy.net"
+                  className="inline-flex items-center gap-3 px-8 py-4 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-base font-semibold shadow-xl shadow-emerald-600/25 hover:scale-105 transition-all"
+                >
+                  <span>hello@chedy.net</span>
+                  <span>↗</span>
+                </a>
+              </div>
 
-          <div
-            style={{ color: theme.muted }}
-            className="mt-24 pt-8 border-t border-emerald-500/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium"
-          >
-            <span>CHEDY.NET</span>
-            <span>
-              © {new Date().getFullYear()} Chedy Technologies. All rights reserved.
-            </span>
-          </div>
-        </ScrollSection>
-      </section>
+              <div
+                style={{ color: theme.muted }}
+                className="mt-24 pt-8 border-t border-emerald-500/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium"
+              >
+                <span>CHEDY.NET</span>
+                <span>
+                  © {new Date().getFullYear()} Chedy Technologies.
+                </span>
+              </div>
+            </ScrollSection>
+          </section>
+        </>
+      )}
     </div>
   );
 }
